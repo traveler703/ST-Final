@@ -15,6 +15,7 @@ coverage/
 # Runtime and temporary files
 tmp/
 .playwright-cli/
+newbee-mall/
 *.log
 *.pid
 *.err
