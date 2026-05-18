@@ -1,0 +1,23 @@
+server:
+  port: 28110
+
+spring:
+  application:
+    name: autotest-design-backend
+  datasource:
+    url: ${AUTOTEST_DB_URL:jdbc:mysql://localhost:3306/autotest_design_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${AUTOTEST_DB_USER:root}
+    password: ${AUTOTEST_DB_PASSWORD:123456}
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
+
+llm:
+  base-url: ${LLM_BASE_URL:https://api.deepseek.com}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:deepseek-v4-flash}
+  timeout-seconds: ${LLM_TIMEOUT_SECONDS:90}
+
+app:
+  cors-origin: ${AUTOTEST_CORS_ORIGIN:http://localhost:28111}

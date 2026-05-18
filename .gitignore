@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.*
+
+# Build outputs
+target/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Runtime and temporary files
+tmp/
+.playwright-cli/
+*.log
+*.pid
+*.err
+*.out
+
+# IDE and OS files
+.idea/
+.vscode/
+.git.local-backup/
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+!.env.example
