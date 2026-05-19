@@ -249,10 +249,6 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (projectId) refresh();
-  }, [projectId]);
-
-  useEffect(() => {
     const saved = window.localStorage.getItem("autotest-sidebar-width-v2");
     if (saved) setSidebarWidth(clampSidebarWidth(Number(saved)));
   }, []);

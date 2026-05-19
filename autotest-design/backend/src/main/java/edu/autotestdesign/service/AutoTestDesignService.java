@@ -579,6 +579,7 @@ public class AutoTestDesignService {
             sheet(wb, "Coverage Matrix", list(snapshot.get("coverageItems")), List.of("id", "requirement_id", "coverage_type", "description", "rationale", "status"));
             sheet(wb, "Strategies", list(snapshot.get("coverageStrategies")), List.of("coverage_item_id", "techniques", "rationale", "status"));
             sheet(wb, "Test Cases", list(snapshot.get("testCases")), List.of("test_case_key", "requirement_id", "coverage_item_id", "technique", "priority", "preconditions", "test_data", "steps", "expected_result", "oracle_explanation", "automation_candidate", "traceability"));
+            sheet(wb, "Optimized Suites", suiteExportRows(list(snapshot.get("suiteVariants"))), List.of("variant_name", "original_cases", "optimized_cases", "removed_cases", "reduction_ratio", "covered_requirements", "covered_techniques", "covered_high_risk_items", "selection_reason"));
             sheet(wb, "Prompt Runs", list(snapshot.get("promptRuns")), List.of("stage", "model", "input_summary", "output_summary", "success", "created_at"));
             sheet(wb, "Review Changes", list(snapshot.get("reviewRevisions")), List.of("item_type", "item_id", "field_name", "old_value", "new_value", "note", "created_at"));
             wb.write(out);
@@ -596,6 +597,25 @@ public class AutoTestDesignService {
             for (int i = 0; i < columns.size(); i++) xlsxRow.createCell(i).setCellValue(string(row.get(columns.get(i)), ""));
         }
         for (int i = 0; i < columns.size(); i++) sheet.autoSizeColumn(i);
+    }
+
+    private List<Map<String, Object>> suiteExportRows(List<Map<String, Object>> suites) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> suite : suites) {
+            Map<String, Object> summary = map(suite.get("optimization_summary"));
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("variant_name", suite.get("variant_name"));
+            row.put("original_cases", summary.get("originalCaseCount"));
+            row.put("optimized_cases", summary.get("optimizedCaseCount"));
+            row.put("removed_cases", summary.get("removedCaseCount"));
+            row.put("reduction_ratio", summary.get("reductionRatio"));
+            row.put("covered_requirements", joinField(list(summary.get("coveredRequirements")), "requirement_key"));
+            row.put("covered_techniques", joinField(list(summary.get("coveredTechniques")), "technique"));
+            row.put("covered_high_risk_items", joinField(list(summary.get("coveredHighRiskItems")), "requirement_key"));
+            row.put("selection_reason", summary.get("selectionReason"));
+            rows.add(row);
+        }
+        return rows;
     }
 
     private void insertSuite(long projectId, String name, String description, List<Long> ids, String rationale) {
@@ -859,6 +879,19 @@ public class AutoTestDesignService {
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> list(Object value) {
         return value instanceof List<?> l ? (List<Map<String, Object>>) l : List.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
+    private static String joinField(List<Map<String, Object>> rows, String field) {
+        return rows.stream()
+                .map(row -> string(row.get(field), ""))
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .collect(Collectors.joining("; "));
     }
 
     private static String csv(Object value) {
