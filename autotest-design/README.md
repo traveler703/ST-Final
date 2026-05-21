@@ -32,9 +32,11 @@ The frontend can switch generation calls between `deepseek-v4-flash` and `deepse
 Backend:
 
 ```powershell
-cd E:\College\3down\ST\FINAL\autotest-design\backend
-mvn spring-boot:run
+cd autotest-design/backend
+./mvnw spring-boot:run
 ```
+
+If you have Maven installed globally, `mvn spring-boot:run` also works.
 
 Frontend:
 

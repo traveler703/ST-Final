@@ -341,6 +341,31 @@ select:focus-visible {
   gap: 12px;
 }
 
+.pipelineRunAll {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 4px;
+}
+
+.pipelineRunAll .button {
+  flex-shrink: 0;
+}
+
+.pipelineRunAllHint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.projectMeta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .toolbar {
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
 }

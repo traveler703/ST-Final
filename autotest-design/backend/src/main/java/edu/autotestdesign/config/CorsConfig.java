@@ -14,7 +14,10 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins(origin)
+                        .allowedOriginPatterns(java.util.Arrays.stream(origin.split(","))
+                                .map(String::trim)
+                                .filter(value -> !value.isBlank())
+                                .toArray(String[]::new))
                         .allowedMethods("GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .exposedHeaders("Content-Disposition");

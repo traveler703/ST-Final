@@ -11,6 +11,7 @@ import {
   GitBranch,
   Layers3,
   Pencil,
+  ListOrdered,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -51,6 +52,16 @@ const modelOptions = [
   { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }
 ];
 
+const pipelineSteps = [
+  { path: "/requirements/structure", label: "Structuring requirements" },
+  { path: "/risk/analyze", label: "Analyzing risk" },
+  { path: "/coverage/generate", label: "Generating coverage" },
+  { path: "/strategies/generate", label: "Generating strategies" },
+  { path: "/test-cases/generate", label: "Generating test cases" },
+  { path: "/white-box/model", label: "Generating white-box model" },
+  { path: "/suite/optimize", label: "Optimizing suite" }
+] as const;
+
 type ViewId = "overview" | "requirements" | "analysis" | "cases" | "models" | "logs";
 
 const workspaceViews: Array<{ id: ViewId; label: string; description: string }> = [
@@ -78,6 +89,52 @@ function numberValue(value: unknown) {
 
 function rowList(value: unknown): Row[] {
   return Array.isArray(value) ? value.filter((item): item is Row => typeof item === "object" && item !== null) : [];
+}
+
+const PROJECT_ID_STORAGE_KEY = "autotest-active-project-id";
+
+function pickRows(source: Record<string, unknown>, camel: string, snake: string) {
+  return rowList(source[camel] ?? source[snake]);
+}
+
+function normalizeSnapshot(raw: unknown): Snapshot {
+  if (!raw || typeof raw !== "object") return { ...emptySnapshot };
+
+  const root = raw as Record<string, unknown>;
+  const nestedProject = root.project;
+  const hasSnapshotArrays =
+    Array.isArray(root.requirements) ||
+    Array.isArray(root.riskAssessments) ||
+    Array.isArray(root.risk_assessments) ||
+    Array.isArray(root.coverageItems) ||
+    Array.isArray(root.coverage_items);
+
+  const source =
+    hasSnapshotArrays
+      ? root
+      : nestedProject && typeof nestedProject === "object" && !Array.isArray(nestedProject)
+        ? (nestedProject as Record<string, unknown>)
+        : root;
+
+  const projectRow =
+    typeof source.project === "object" && source.project !== null
+      ? (source.project as Row)
+      : typeof source.id !== "undefined" && !hasSnapshotArrays && !Array.isArray(source.requirements)
+        ? (source as Row)
+        : undefined;
+
+  return {
+    project: projectRow,
+    requirements: pickRows(source, "requirements", "requirements"),
+    riskAssessments: pickRows(source, "riskAssessments", "risk_assessments"),
+    coverageItems: pickRows(source, "coverageItems", "coverage_items"),
+    coverageStrategies: pickRows(source, "coverageStrategies", "coverage_strategies"),
+    testCases: pickRows(source, "testCases", "test_cases"),
+    whiteboxModels: pickRows(source, "whiteboxModels", "whitebox_models"),
+    suiteVariants: pickRows(source, "suiteVariants", "suite_variants"),
+    promptRuns: pickRows(source, "promptRuns", "prompt_runs"),
+    reviewRevisions: pickRows(source, "reviewRevisions", "review_revisions")
+  };
 }
 
 async function api(path: string, init?: RequestInit) {
@@ -119,13 +176,32 @@ export default function Home() {
   );
   const activeWorkspace = workspaceViews.find((view) => view.id === activeView) ?? workspaceViews[0];
 
+  function applySnapshot(raw: unknown) {
+    setSnapshot(normalizeSnapshot(raw));
+  }
+
+  function ensureImportedRequirements() {
+    if (snapshot.requirements.length === 0) {
+      throw new Error(
+        "当前项目还没有需求。请先在 Requirement Ingestion 上传 xlsx/csv/txt 或粘贴文本，并点击 Import Requirements，再运行 AI 流水线。"
+      );
+    }
+  }
+
   async function run(label: string, action: () => Promise<void>) {
     setBusy(label);
     setError("");
     try {
       await action();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "Failed to fetch") {
+        setError(
+          "无法连接后端 API。请确认后端已启动（http://localhost:28110/api/health），并使用 http://localhost:28111 或 http://127.0.0.1:28111 打开前端。"
+        );
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy("");
     }
@@ -134,7 +210,7 @@ export default function Home() {
   async function refresh(id = projectId) {
     if (!id) return;
     const data = await api(`/projects/${id}`);
-    setSnapshot(data);
+    applySnapshot(data);
   }
 
   async function createProject() {
@@ -144,33 +220,65 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: projectName, targetApp, description })
       });
-      setProjectId(Number(data.id));
-      await refresh(Number(data.id));
+      const snapshotData = normalizeSnapshot(data);
+      const id = Number(snapshotData.project?.id ?? (data as Row).id);
+      if (!Number.isFinite(id)) {
+        throw new Error("创建项目失败：后端未返回有效的项目 id。");
+      }
+      setProjectId(id);
+      applySnapshot(data);
     });
   }
 
   async function importRequirements() {
     if (!projectId) return;
+    if (!file && !manualText.trim()) {
+      setError("请先选择文件或在文本框中粘贴需求，再点击 Import Requirements。");
+      return;
+    }
     await run("Importing requirements", async () => {
       const form = new FormData();
       if (file) form.append("file", file);
       if (manualText.trim()) form.append("manualText", manualText);
       form.append("sourceType", file ? "file" : "manual");
       const data = await api(`/projects/${projectId}/requirements/import`, { method: "POST", body: form });
-      setSnapshot(data.project);
+      applySnapshot(data);
+      const imported = Number((data as Row).imported ?? 0);
+      const requirementCount = normalizeSnapshot(data).requirements.length;
+      if (imported === 0 || requirementCount === 0) {
+        throw new Error("导入完成，但没有解析到有效需求行。请检查 xlsx 格式或手动输入内容。");
+      }
     });
   }
 
   async function generate(path: string, label: string, nextView?: ViewId) {
     if (!projectId) return;
     await run(label, async () => {
+      ensureImportedRequirements();
       const data = await api(`/projects/${projectId}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: selectedModel })
       });
-      setSnapshot(data);
+      applySnapshot(data);
       if (nextView) setActiveView(nextView);
+    });
+  }
+
+  async function runFullPipeline() {
+    if (!projectId) return;
+    await run("Full AI pipeline", async () => {
+      ensureImportedRequirements();
+      for (let i = 0; i < pipelineSteps.length; i++) {
+        const step = pipelineSteps[i];
+        setBusy(`${step.label} (${i + 1}/${pipelineSteps.length})`);
+        const data = await api(`/projects/${projectId}${step.path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: selectedModel })
+        });
+        applySnapshot(data);
+      }
     });
   }
 
@@ -257,6 +365,22 @@ export default function Home() {
     window.localStorage.setItem("autotest-sidebar-width-v2", String(sidebarWidth));
   }, [sidebarWidth]);
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem(PROJECT_ID_STORAGE_KEY);
+    if (!saved) return;
+    const id = Number(saved);
+    if (!Number.isFinite(id)) return;
+    setProjectId(id);
+    void refresh(id).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore last active project once on mount
+  }, []);
+
+  useEffect(() => {
+    if (projectId) window.localStorage.setItem(PROJECT_ID_STORAGE_KEY, String(projectId));
+  }, [projectId]);
+
   return (
     <div className="appShell" style={{ gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr)` }}>
       <aside className="sidebar">
@@ -282,8 +406,18 @@ export default function Home() {
           <label>Testing concept</label>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={6} />
           <button className="button" onClick={createProject} disabled={busy !== ""}>
-            <Boxes size={16} /> Create / Reset Project
+            <Boxes size={16} /> Create New Project
           </button>
+          <button className="ghostButton" onClick={() => refresh()} disabled={!projectId || busy !== ""}>
+            <RefreshCw size={14} /> Reload Project Data
+          </button>
+          {projectId && (
+            <p className="projectMeta">
+              Active project #{projectId}
+              {snapshot.project?.name ? ` · ${text(snapshot.project.name)}` : ""}
+              {counts.requirements > 0 ? ` · ${counts.requirements} requirements` : " · no requirements imported"}
+            </p>
+          )}
         </section>
 
         <section className="workspaceNav" aria-label="Workspace sections">
@@ -317,7 +451,9 @@ export default function Home() {
             <span className="eyebrow"><Activity size={14} /> Generation cockpit</span>
             <h2>{activeWorkspace.label}</h2>
             <p>
-              {snapshot.project ? `${text(snapshot.project.name)} / ${activeWorkspace.description}` : activeWorkspace.description}
+              {projectId
+                ? `Project #${projectId}${snapshot.project?.name ? ` (${text(snapshot.project.name)})` : ""} · ${counts.requirements} requirements · ${counts.tests} test cases / ${activeWorkspace.description}`
+                : activeWorkspace.description}
             </p>
           </div>
           <div className="topActions">
@@ -384,6 +520,19 @@ export default function Home() {
                       <option key={model.value} value={model.value}>{model.label}</option>
                     ))}
                   </select>
+                </div>
+                <div className="pipelineRunAll">
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={!projectId || busy !== ""}
+                    onClick={runFullPipeline}
+                  >
+                    <ListOrdered size={16} /> One Click Run All
+                  </button>
+                  <span className="pipelineRunAllHint">
+                    Structure → Risk → Coverage → Strategies → Test Cases → White-box → Optimize
+                  </span>
                 </div>
                 <div className="toolbar">
                   <Action onClick={() => generate("/requirements/structure", "Structuring requirements", "requirements")} label="Structure" icon={<Bot size={15} />} disabled={!projectId || busy !== ""} />

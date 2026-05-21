@@ -20,4 +20,4 @@ llm:
   timeout-seconds: ${LLM_TIMEOUT_SECONDS:90}
 
 app:
-  cors-origin: ${AUTOTEST_CORS_ORIGIN:http://localhost:28111}
+  cors-origin: ${AUTOTEST_CORS_ORIGIN:http://localhost:28111,http://127.0.0.1:28111}

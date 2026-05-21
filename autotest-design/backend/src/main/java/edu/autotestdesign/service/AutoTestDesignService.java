@@ -66,7 +66,7 @@ public class AutoTestDesignService {
         long id = insert("""
                 INSERT INTO projects(name, description, target_app) VALUES (?, ?, ?)
                 """, name, description, targetApp);
-        return getProject(id);
+        return projectSnapshot(id);
     }
 
     public List<Map<String, Object>> listProjects() {
