@@ -57,10 +57,8 @@ $env:LLM_BASE_URL="https://api.deepseek.com"
 $env:LLM_API_KEY="your-api-key"
 $env:LLM_MODEL="deepseek-v4-flash"
 
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
-
-未安装全局 `mvn` 时，使用项目自带的 `./mvnw` 即可（首次运行会自动下载 Maven 3.9.9）。若已安装 Maven，也可改用 `mvn spring-boot:run`。
 
 后端默认地址：`http://localhost:28110`
 

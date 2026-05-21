@@ -33,10 +33,8 @@ Backend:
 
 ```powershell
 cd autotest-design/backend
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
-
-If you have Maven installed globally, `mvn spring-boot:run` also works.
 
 Frontend:
 
