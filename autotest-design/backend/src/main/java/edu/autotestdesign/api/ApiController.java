@@ -102,6 +102,16 @@ public class ApiController {
         return service.patchReviewItem(id, body);
     }
 
+    @PostMapping("/projects/{id}/review-items")
+    public Map<String, Object> createReviewItem(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        return service.createReviewItem(id, body);
+    }
+
+    @PostMapping("/projects/{id}/execution-evidence")
+    public Map<String, Object> executionEvidence(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        return service.recordExecutionEvidence(id, body);
+    }
+
     @PostMapping("/projects/{id}/exports/{format}")
     public ResponseEntity<byte[]> export(@PathVariable long id, @PathVariable String format, HttpServletResponse response) throws IOException {
         AutoTestDesignService.ExportFile file = service.exportProject(id, format);

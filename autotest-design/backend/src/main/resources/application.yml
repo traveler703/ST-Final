@@ -5,7 +5,7 @@ spring:
   application:
     name: autotest-design-backend
   datasource:
-    url: ${AUTOTEST_DB_URL:jdbc:mysql://localhost:3306/autotest_design_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    url: ${AUTOTEST_DB_URL:jdbc:mysql://127.0.0.1:3306/autotest_design_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${AUTOTEST_DB_USER:root}
     password: ${AUTOTEST_DB_PASSWORD:123456}
   sql:

@@ -148,6 +148,26 @@ CREATE TABLE IF NOT EXISTS review_revisions (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS execution_evidence (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  test_case_id BIGINT,
+  target_module VARCHAR(160),
+  framework VARCHAR(120),
+  command_text TEXT,
+  execution_status VARCHAR(24) NOT NULL,
+  expected_result TEXT,
+  actual_result TEXT,
+  evidence_text MEDIUMTEXT,
+  defect_ref VARCHAR(160),
+  improvement_action TEXT,
+  reviewer VARCHAR(120),
+  executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_evidence_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  CONSTRAINT fk_evidence_test_case FOREIGN KEY (test_case_id) REFERENCES test_cases(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS export_artifacts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   project_id BIGINT NOT NULL,

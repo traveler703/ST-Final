@@ -14,8 +14,10 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -84,6 +86,7 @@ public class AutoTestDesignService {
         snapshot.put("whiteboxModels", rows("SELECT * FROM whitebox_models WHERE project_id=? ORDER BY id", projectId));
         snapshot.put("suiteVariants", suiteVariants(projectId));
         snapshot.put("promptRuns", rows("SELECT * FROM prompt_runs WHERE project_id=? ORDER BY id DESC", projectId));
+        snapshot.put("executionEvidence", rows("SELECT * FROM execution_evidence WHERE project_id=? ORDER BY executed_at DESC, id DESC", projectId));
         snapshot.put("reviewRevisions", rows("""
                 SELECT rr.* FROM review_revisions rr
                 WHERE EXISTS (SELECT 1 FROM requirements r WHERE r.id=rr.item_id AND rr.item_type='requirement' AND r.project_id=?)
@@ -347,6 +350,40 @@ public class AutoTestDesignService {
         return Map.of("updated", true, "itemType", itemType, "itemId", itemId, "field", fieldName);
     }
 
+    public Map<String, Object> createReviewItem(long projectId, Map<String, Object> body) {
+        requireProject(projectId);
+        String itemType = string(body.get("itemType"), "");
+        long id = switch (itemType) {
+            case "coverage" -> createCoverageItem(projectId, body);
+            case "strategy" -> createStrategyItem(projectId, body);
+            case "testCase" -> createTestCase(projectId, body);
+            default -> throw new IllegalArgumentException("Unsupported review item type: " + itemType);
+        };
+        jdbc.update("""
+                INSERT INTO review_revisions(item_type, item_id, field_name, old_value, new_value, note)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, itemType, id, "__created__", "", safeJson(body),
+                string(body.get("note"), "Designer added an evidence-based review item"));
+        return projectSnapshot(projectId);
+    }
+
+    public Map<String, Object> recordExecutionEvidence(long projectId, Map<String, Object> body) {
+        requireProject(projectId);
+        Long testCaseId = optionalLong(body.get("testCaseId"));
+        jdbc.update("""
+                INSERT INTO execution_evidence(project_id, test_case_id, target_module, framework, command_text,
+                execution_status, expected_result, actual_result, evidence_text, defect_ref, improvement_action, reviewer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, projectId, testCaseId, string(body.get("targetModule"), ""),
+                string(body.get("framework"), "PyTest/requests smoke check"),
+                string(body.get("commandText"), "python newbee-mall/tools/smoke_test_newbee.py"),
+                normalizedExecutionStatus(body.get("executionStatus")),
+                string(body.get("expectedResult"), ""), string(body.get("actualResult"), ""),
+                string(body.get("evidenceText"), ""), string(body.get("defectRef"), ""),
+                string(body.get("improvementAction"), ""), string(body.get("reviewer"), "Designer"));
+        return projectSnapshot(projectId);
+    }
+
     public ExportFile exportProject(long projectId, String format) throws IOException {
         Map<String, Object> snapshot = projectSnapshot(projectId);
         String normalized = format.toLowerCase(Locale.ROOT);
@@ -580,6 +617,7 @@ public class AutoTestDesignService {
             sheet(wb, "Strategies", list(snapshot.get("coverageStrategies")), List.of("coverage_item_id", "techniques", "rationale", "status"));
             sheet(wb, "Test Cases", list(snapshot.get("testCases")), List.of("test_case_key", "requirement_id", "coverage_item_id", "technique", "priority", "preconditions", "test_data", "steps", "expected_result", "oracle_explanation", "automation_candidate", "traceability"));
             sheet(wb, "Optimized Suites", suiteExportRows(list(snapshot.get("suiteVariants"))), List.of("variant_name", "original_cases", "optimized_cases", "removed_cases", "reduction_ratio", "covered_requirements", "covered_techniques", "covered_high_risk_items", "selection_reason"));
+            sheet(wb, "Execution Evidence", list(snapshot.get("executionEvidence")), List.of("id", "test_case_id", "target_module", "framework", "command_text", "execution_status", "expected_result", "actual_result", "evidence_text", "defect_ref", "improvement_action", "reviewer", "executed_at"));
             sheet(wb, "Prompt Runs", list(snapshot.get("promptRuns")), List.of("stage", "model", "input_summary", "output_summary", "success", "created_at"));
             sheet(wb, "Review Changes", list(snapshot.get("reviewRevisions")), List.of("item_type", "item_id", "field_name", "old_value", "new_value", "note", "created_at"));
             wb.write(out);
@@ -723,6 +761,83 @@ public class AutoTestDesignService {
                 || "High".equalsIgnoreCase(string(test.get("risk_priority"), ""));
     }
 
+    private long createCoverageItem(long projectId, Map<String, Object> body) {
+        long requirementId = requiredLong(body.get("requirementId"), "requirementId");
+        assertRequirementInProject(projectId, requirementId);
+        return insert("""
+                INSERT INTO coverage_items(project_id, requirement_id, coverage_type, description, rationale, status)
+                VALUES (?, ?, ?, ?, ?, 'REVIEWED')
+                """, projectId, requirementId, string(body.get("coverageType"), "evidence-based improvement"),
+                string(body.get("description"), ""), string(body.get("rationale"), ""));
+    }
+
+    private long createStrategyItem(long projectId, Map<String, Object> body) {
+        long coverageItemId = requiredLong(body.get("coverageItemId"), "coverageItemId");
+        assertCoverageInProject(projectId, coverageItemId);
+        return insert("""
+                INSERT INTO coverage_strategies(project_id, coverage_item_id, techniques, rationale, status)
+                VALUES (?, ?, ?, ?, 'REVIEWED')
+                """, projectId, coverageItemId, string(body.get("techniques"), "Exploratory Testing"),
+                string(body.get("rationale"), ""));
+    }
+
+    private long createTestCase(long projectId, Map<String, Object> body) {
+        Long coverageItemId = optionalLong(body.get("coverageItemId"));
+        long requirementId = optionalLong(body.get("requirementId")) == null
+                ? requirementIdForCoverage(projectId, coverageItemId)
+                : optionalLong(body.get("requirementId"));
+        assertRequirementInProject(projectId, requirementId);
+        if (coverageItemId != null) assertCoverageInProject(projectId, coverageItemId);
+        String key = firstNonBlank(string(body.get("testCaseKey"), ""), "TC-REV-" + System.currentTimeMillis());
+        return insert("""
+                INSERT INTO test_cases(project_id, test_case_key, requirement_id, coverage_item_id, technique, priority,
+                preconditions, test_data, steps, expected_result, oracle_explanation, automation_candidate, traceability, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REVIEWED')
+                """, projectId, key, requirementId, coverageItemId, string(body.get("technique"), "Evidence-based Test"),
+                string(body.get("priority"), "High"), string(body.get("preconditions"), ""),
+                string(body.get("testData"), ""), string(body.get("steps"), ""),
+                string(body.get("expectedResult"), ""), string(body.get("oracleExplanation"), ""),
+                string(body.get("automationCandidate"), "Partial"),
+                string(body.get("traceability"), "Requirement -> Evidence improvement -> Test case"));
+    }
+
+    private void assertRequirementInProject(long projectId, long requirementId) {
+        int found = count("SELECT COUNT(*) FROM requirements WHERE project_id=? AND id=?", projectId, requirementId);
+        if (found == 0) throw new IllegalArgumentException("Requirement does not belong to project: " + requirementId);
+    }
+
+    private void assertCoverageInProject(long projectId, long coverageItemId) {
+        int found = count("SELECT COUNT(*) FROM coverage_items WHERE project_id=? AND id=?", projectId, coverageItemId);
+        if (found == 0) throw new IllegalArgumentException("Coverage item does not belong to project: " + coverageItemId);
+    }
+
+    private long requirementIdForCoverage(long projectId, Long coverageItemId) {
+        if (coverageItemId == null) throw new IllegalArgumentException("requirementId or coverageItemId is required");
+        Number value = jdbc.queryForObject(
+                "SELECT requirement_id FROM coverage_items WHERE project_id=? AND id=?",
+                Number.class, projectId, coverageItemId);
+        if (value == null) throw new IllegalArgumentException("Coverage item does not belong to project: " + coverageItemId);
+        return value.longValue();
+    }
+
+    private static long requiredLong(Object value, String field) {
+        Long parsed = optionalLong(value);
+        if (parsed == null) throw new IllegalArgumentException(field + " is required");
+        return parsed;
+    }
+
+    private static Long optionalLong(Object value) {
+        if (value == null) return null;
+        String text = String.valueOf(value).trim();
+        if (text.isBlank() || "null".equalsIgnoreCase(text)) return null;
+        return Long.parseLong(text);
+    }
+
+    private static String normalizedExecutionStatus(Object value) {
+        String status = string(value, "PASS").trim().toUpperCase(Locale.ROOT);
+        return Set.of("PASS", "FAIL", "BLOCKED", "NOT_RUN").contains(status) ? status : "PASS";
+    }
+
     private void logPrompt(long projectId, String stage, String model, String prompt, String inputSummary, String outputSummary, boolean success) {
         jdbc.update("""
                 INSERT INTO prompt_runs(project_id, stage, model, prompt, input_summary, output_summary, success)
@@ -741,7 +856,11 @@ public class AutoTestDesignService {
     }
 
     private Map<String, Object> getProject(long id) {
-        return jdbc.queryForMap("SELECT * FROM projects WHERE id=?", id);
+        try {
+            return jdbc.queryForMap("SELECT * FROM projects WHERE id=?", id);
+        } catch (EmptyResultDataAccessException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found: " + id);
+        }
     }
 
     private void requireProject(long id) {

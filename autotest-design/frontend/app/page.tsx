@@ -12,6 +12,7 @@ import {
   Layers3,
   Pencil,
   ListOrdered,
+  Plus,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -33,6 +34,7 @@ type Snapshot = {
   suiteVariants: Row[];
   promptRuns: Row[];
   reviewRevisions: Row[];
+  executionEvidence: Row[];
 };
 
 const emptySnapshot: Snapshot = {
@@ -44,7 +46,8 @@ const emptySnapshot: Snapshot = {
   whiteboxModels: [],
   suiteVariants: [],
   promptRuns: [],
-  reviewRevisions: []
+  reviewRevisions: [],
+  executionEvidence: []
 };
 
 const modelOptions = [
@@ -62,13 +65,14 @@ const pipelineSteps = [
   { path: "/suite/optimize", label: "Optimizing suite" }
 ] as const;
 
-type ViewId = "overview" | "requirements" | "analysis" | "cases" | "models" | "logs";
+type ViewId = "overview" | "requirements" | "analysis" | "cases" | "evidence" | "models" | "logs";
 
 const workspaceViews: Array<{ id: ViewId; label: string; description: string }> = [
   { id: "overview", label: "Overview", description: "Project setup, import, and AI pipeline" },
   { id: "requirements", label: "Requirements", description: "Structured requirements and review" },
   { id: "analysis", label: "Risk & Coverage", description: "Risk matrix, coverage items, and strategies" },
   { id: "cases", label: "Test Cases", description: "Generated cases and human review" },
+  { id: "evidence", label: "Execution Evidence", description: "Target-app execution results and improvements" },
   { id: "models", label: "Artifacts & Export", description: "White-box model, suites, and FR 6.0 exports" },
   { id: "logs", label: "Prompt Log", description: "Model calls, fallbacks, and summaries" }
 ];
@@ -133,7 +137,8 @@ function normalizeSnapshot(raw: unknown): Snapshot {
     whiteboxModels: pickRows(source, "whiteboxModels", "whitebox_models"),
     suiteVariants: pickRows(source, "suiteVariants", "suite_variants"),
     promptRuns: pickRows(source, "promptRuns", "prompt_runs"),
-    reviewRevisions: pickRows(source, "reviewRevisions", "review_revisions")
+    reviewRevisions: pickRows(source, "reviewRevisions", "review_revisions"),
+    executionEvidence: pickRows(source, "executionEvidence", "execution_evidence")
   };
 }
 
@@ -141,7 +146,9 @@ async function api(path: string, init?: RequestInit) {
   const res = await fetch(`${API}${path}`, init);
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+    const error = new Error(`${res.status} ${res.statusText}: ${body}`);
+    (error as Error & { status?: number }).status = res.status;
+    throw error;
   }
   const contentType = res.headers.get("content-type") ?? "";
   return contentType.includes("application/json") ? res.json() : res.blob();
@@ -160,6 +167,34 @@ export default function Home() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [reviewDraft, setReviewDraft] = useState<Record<string, string>>({});
+  const [newCoverage, setNewCoverage] = useState({
+    requirementId: "",
+    coverageType: "evidence-based improvement",
+    description: "",
+    rationale: ""
+  });
+  const [newTestCase, setNewTestCase] = useState({
+    requirementId: "",
+    coverageItemId: "",
+    testCaseKey: "",
+    technique: "Evidence-based Test",
+    priority: "High",
+    steps: "",
+    expectedResult: "",
+    traceability: ""
+  });
+  const [evidenceDraft, setEvidenceDraft] = useState({
+    testCaseId: "",
+    targetModule: "newbee-mall",
+    framework: "PyTest/requests smoke check",
+    commandText: "python newbee-mall/tools/smoke_test_newbee.py",
+    executionStatus: "PASS",
+    expectedResult: "",
+    actualResult: "",
+    evidenceText: "",
+    improvementAction: "",
+    defectRef: ""
+  });
   const [selectedModel, setSelectedModel] = useState(modelOptions[0].value);
   const [activeView, setActiveView] = useState<ViewId>("overview");
   const [sidebarWidth, setSidebarWidth] = useState(440);
@@ -170,7 +205,8 @@ export default function Home() {
       risks: snapshot.riskAssessments.length,
       coverage: snapshot.coverageItems.length,
       tests: snapshot.testCases.length,
-      suites: snapshot.suiteVariants.length
+      suites: snapshot.suiteVariants.length,
+      evidence: snapshot.executionEvidence.length
     }),
     [snapshot]
   );
@@ -209,8 +245,19 @@ export default function Home() {
 
   async function refresh(id = projectId) {
     if (!id) return;
-    const data = await api(`/projects/${id}`);
-    applySnapshot(data);
+    try {
+      const data = await api(`/projects/${id}`);
+      applySnapshot(data);
+    } catch (err) {
+      if ((err as Error & { status?: number }).status === 404) {
+        window.localStorage.removeItem(PROJECT_ID_STORAGE_KEY);
+        setProjectId(null);
+        setSnapshot(emptySnapshot);
+        setActiveView("overview");
+        return;
+      }
+      throw err;
+    }
   }
 
   async function createProject() {
@@ -309,6 +356,55 @@ export default function Home() {
     });
   }
 
+  async function createReviewItem(itemType: "coverage" | "testCase", payload: Record<string, string>) {
+    if (!projectId) return;
+    await run(`Adding ${itemType}`, async () => {
+      const data = await api(`/projects/${projectId}/review-items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemType, ...payload, note: "Evidence-based FR9 improvement" })
+      });
+      applySnapshot(data);
+      if (itemType === "coverage") {
+        setNewCoverage({ requirementId: "", coverageType: "evidence-based improvement", description: "", rationale: "" });
+        setActiveView("analysis");
+      } else {
+        setNewTestCase({
+          requirementId: "",
+          coverageItemId: "",
+          testCaseKey: "",
+          technique: "Evidence-based Test",
+          priority: "High",
+          steps: "",
+          expectedResult: "",
+          traceability: ""
+        });
+        setActiveView("cases");
+      }
+    });
+  }
+
+  async function recordEvidence() {
+    if (!projectId) return;
+    await run("Recording execution evidence", async () => {
+      const data = await api(`/projects/${projectId}/execution-evidence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(evidenceDraft)
+      });
+      applySnapshot(data);
+      setEvidenceDraft((draft) => ({
+        ...draft,
+        testCaseId: "",
+        expectedResult: "",
+        actualResult: "",
+        evidenceText: "",
+        improvementAction: "",
+        defectRef: ""
+      }));
+    });
+  }
+
   function draftKey(itemType: string, id: unknown, field: string) {
     return `${itemType}:${id}:${field}`;
   }
@@ -356,6 +452,27 @@ export default function Home() {
     );
   }
 
+  function EditableFields({
+    itemType,
+    row,
+    fields
+  }: {
+    itemType: string;
+    row: Row;
+    fields: Array<{ field: string; label: string; multiline?: boolean }>;
+  }) {
+    return (
+      <div className="reviewFieldStack">
+        {fields.map((item) => (
+          <div className="reviewField" key={item.field}>
+            <span>{item.label}</span>
+            <EditableCell itemType={itemType} row={row} field={item.field} multiline={item.multiline} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   useEffect(() => {
     const saved = window.localStorage.getItem("autotest-sidebar-width-v2");
     if (saved) setSidebarWidth(clampSidebarWidth(Number(saved)));
@@ -372,7 +489,13 @@ export default function Home() {
     if (!Number.isFinite(id)) return;
     setProjectId(id);
     void refresh(id).catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
+      if ((err as Error & { status?: number }).status === 404) {
+        window.localStorage.removeItem(PROJECT_ID_STORAGE_KEY);
+        setProjectId(null);
+        setSnapshot(emptySnapshot);
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore last active project once on mount
   }, []);
@@ -474,7 +597,7 @@ export default function Home() {
               <Metric label="Risks" value={counts.risks} />
               <Metric label="Coverage Items" value={counts.coverage} />
               <Metric label="Test Cases" value={counts.tests} />
-              <Metric label="Suites" value={counts.suites} />
+              <Metric label="Execution Evidence" value={counts.evidence} />
             </section>
 
             <section className="twoCol">
@@ -572,25 +695,142 @@ export default function Home() {
               subtitle="Coverage items and selected strategies"
               rows={snapshot.coverageItems}
               columns={["id", "requirement_id", "coverage_type", "description", "rationale", "status"]}
-              editable={(row) => <EditableCell itemType="coverage" row={row} field="description" multiline />}
+              editable={(row) => (
+                <EditableFields
+                  itemType="coverage"
+                  row={row}
+                  fields={[
+                    { field: "coverage_type", label: "Type" },
+                    { field: "description", label: "Coverage", multiline: true },
+                    { field: "rationale", label: "Rationale", multiline: true }
+                  ]}
+                />
+              )}
             />
             <PanelTable
               title="Strategy Map"
-              subtitle="Selected testing techniques per coverage item"
+              subtitle="Selected testing techniques per coverage item, editable by the designer"
               rows={snapshot.coverageStrategies}
-              columns={["coverage_item_id", "techniques", "rationale", "status"]}
+              columns={["id", "coverage_item_id", "techniques", "rationale", "status"]}
+              editable={(row) => (
+                <EditableFields
+                  itemType="strategy"
+                  row={row}
+                  fields={[
+                    { field: "techniques", label: "Techniques", multiline: true },
+                    { field: "rationale", label: "Rationale", multiline: true }
+                  ]}
+                />
+              )}
             />
+            <section className="panel">
+              <div className="panelHeader">
+                <div>
+                  <h3>Evidence-Based Coverage Improvement</h3>
+                  <p className="panelNote">Add a new coverage item after reviewing execution results or discovered gaps.</p>
+                </div>
+                <span>FR9 improvement</span>
+              </div>
+              <div className="formGrid">
+                <input className="input" placeholder="Requirement ID" value={newCoverage.requirementId} onChange={(e) => setNewCoverage((draft) => ({ ...draft, requirementId: e.target.value }))} />
+                <input className="input" placeholder="Coverage type" value={newCoverage.coverageType} onChange={(e) => setNewCoverage((draft) => ({ ...draft, coverageType: e.target.value }))} />
+                <textarea className="input" rows={3} placeholder="New coverage item" value={newCoverage.description} onChange={(e) => setNewCoverage((draft) => ({ ...draft, description: e.target.value }))} />
+                <textarea className="input" rows={3} placeholder="Evidence or rationale" value={newCoverage.rationale} onChange={(e) => setNewCoverage((draft) => ({ ...draft, rationale: e.target.value }))} />
+                <button className="button" disabled={!projectId || busy !== "" || !newCoverage.requirementId || !newCoverage.description} onClick={() => createReviewItem("coverage", newCoverage)}>
+                  <Plus size={16} /> Add Coverage Item
+                </button>
+              </div>
+            </section>
           </div>
         )}
 
         {activeView === "cases" && (
-          <PanelTable
-            title="Test Case Studio"
-            subtitle="Generated test cases with oracle explanations and traceability"
-            rows={snapshot.testCases}
-            columns={["test_case_key", "requirement_id", "coverage_item_id", "technique", "priority", "steps", "expected_result", "oracle_explanation", "automation_candidate", "status"]}
-            editable={(row) => <EditableCell itemType="testCase" row={row} field="expected_result" multiline />}
-          />
+          <div className="viewStack">
+            <PanelTable
+              title="Test Case Studio"
+              subtitle="Generated test cases with oracle explanations and traceability"
+              rows={snapshot.testCases}
+              columns={["id", "test_case_key", "requirement_id", "coverage_item_id", "technique", "priority", "steps", "expected_result", "oracle_explanation", "automation_candidate", "traceability", "status"]}
+              editable={(row) => (
+                <EditableFields
+                  itemType="testCase"
+                  row={row}
+                  fields={[
+                    { field: "technique", label: "Technique" },
+                    { field: "steps", label: "Steps", multiline: true },
+                    { field: "expected_result", label: "Oracle", multiline: true },
+                    { field: "traceability", label: "Traceability", multiline: true }
+                  ]}
+                />
+              )}
+            />
+            <section className="panel">
+              <div className="panelHeader">
+                <div>
+                  <h3>Evidence-Based Test Case Improvement</h3>
+                  <p className="panelNote">Create an extra test case when execution evidence reveals a missing scenario.</p>
+                </div>
+                <span>FR9 improvement</span>
+              </div>
+              <div className="formGrid">
+                <input className="input" placeholder="Requirement ID" value={newTestCase.requirementId} onChange={(e) => setNewTestCase((draft) => ({ ...draft, requirementId: e.target.value }))} />
+                <input className="input" placeholder="Coverage Item ID (optional)" value={newTestCase.coverageItemId} onChange={(e) => setNewTestCase((draft) => ({ ...draft, coverageItemId: e.target.value }))} />
+                <input className="input" placeholder="Test Case Key (optional)" value={newTestCase.testCaseKey} onChange={(e) => setNewTestCase((draft) => ({ ...draft, testCaseKey: e.target.value }))} />
+                <input className="input" placeholder="Technique" value={newTestCase.technique} onChange={(e) => setNewTestCase((draft) => ({ ...draft, technique: e.target.value }))} />
+                <select className="select" value={newTestCase.priority} onChange={(e) => setNewTestCase((draft) => ({ ...draft, priority: e.target.value }))}>
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
+                </select>
+                <textarea className="input wideField" rows={3} placeholder="Steps" value={newTestCase.steps} onChange={(e) => setNewTestCase((draft) => ({ ...draft, steps: e.target.value }))} />
+                <textarea className="input wideField" rows={3} placeholder="Expected result / oracle" value={newTestCase.expectedResult} onChange={(e) => setNewTestCase((draft) => ({ ...draft, expectedResult: e.target.value }))} />
+                <textarea className="input wideField" rows={2} placeholder="Traceability" value={newTestCase.traceability} onChange={(e) => setNewTestCase((draft) => ({ ...draft, traceability: e.target.value }))} />
+                <button className="button" disabled={!projectId || busy !== "" || !newTestCase.requirementId || !newTestCase.steps || !newTestCase.expectedResult} onClick={() => createReviewItem("testCase", newTestCase)}>
+                  <Plus size={16} /> Add Test Case
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeView === "evidence" && (
+          <div className="viewStack">
+            <section className="panel">
+              <div className="panelHeader">
+                <div>
+                  <h3>Target Application Execution Evidence</h3>
+                  <p className="panelNote">Record proof from running newbee-mall checks, then use failures or gaps to add coverage and test cases.</p>
+                </div>
+                <span>newbee-mall validation</span>
+              </div>
+              <div className="formGrid">
+                <input className="input" placeholder="Test Case ID (optional)" value={evidenceDraft.testCaseId} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, testCaseId: e.target.value }))} />
+                <input className="input" placeholder="Target module" value={evidenceDraft.targetModule} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, targetModule: e.target.value }))} />
+                <input className="input" placeholder="Framework" value={evidenceDraft.framework} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, framework: e.target.value }))} />
+                <select className="select" value={evidenceDraft.executionStatus} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, executionStatus: e.target.value }))}>
+                  <option>PASS</option>
+                  <option>FAIL</option>
+                  <option>BLOCKED</option>
+                  <option>NOT_RUN</option>
+                </select>
+                <input className="input wideField" placeholder="Execution command" value={evidenceDraft.commandText} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, commandText: e.target.value }))} />
+                <textarea className="input wideField" rows={3} placeholder="Expected result" value={evidenceDraft.expectedResult} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, expectedResult: e.target.value }))} />
+                <textarea className="input wideField" rows={3} placeholder="Actual result" value={evidenceDraft.actualResult} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, actualResult: e.target.value }))} />
+                <textarea className="input wideField" rows={4} placeholder="Paste command output, screenshot note, or execution summary" value={evidenceDraft.evidenceText} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, evidenceText: e.target.value }))} />
+                <input className="input" placeholder="Defect reference (optional)" value={evidenceDraft.defectRef} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, defectRef: e.target.value }))} />
+                <textarea className="input wideField" rows={3} placeholder="Improvement action: add/modify coverage item, strategy, or test case" value={evidenceDraft.improvementAction} onChange={(e) => setEvidenceDraft((draft) => ({ ...draft, improvementAction: e.target.value }))} />
+                <button className="button" disabled={!projectId || busy !== "" || !evidenceDraft.actualResult} onClick={recordEvidence}>
+                  <Plus size={16} /> Record Evidence
+                </button>
+              </div>
+            </section>
+            <PanelTable
+              title="Execution Evidence Ledger"
+              subtitle="Target application validation records exported with the project artifacts"
+              rows={snapshot.executionEvidence}
+              columns={["id", "test_case_id", "target_module", "framework", "command_text", "execution_status", "expected_result", "actual_result", "evidence_text", "defect_ref", "improvement_action", "executed_at"]}
+            />
+          </div>
         )}
 
         {activeView === "models" && (
@@ -599,7 +839,7 @@ export default function Home() {
               <ArtifactCard title="Risk Scores" value={counts.risks} detail="Included in JSON and Excel workbook" />
               <ArtifactCard title="Test Cases" value={counts.tests} detail="Included in JSON, CSV, and Excel workbook" />
               <ArtifactCard title="Test Suites" value={counts.suites} detail="Included in JSON and Excel workbook" />
-              <ArtifactCard title="Coverage Items" value={counts.coverage} detail="Included in JSON and Excel workbook" />
+              <ArtifactCard title="Execution Evidence" value={counts.evidence} detail="Included in JSON and Excel workbook" />
             </section>
             <section className="panel">
               <div className="panelHeader">

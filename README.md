@@ -9,14 +9,16 @@
 ```text
 ST-Final/
 ├── autotest-design/
-│   ├── backend/        # Spring Boot 后端
-│   └── frontend/       # Next.js 前端
-├── CODE_WIKI.md        # 代码与功能说明
-├── PROJECT_STATUS.md   # 功能完成情况记录
+│   ├── backend/                        # Spring Boot 后端
+│   └── frontend/                       # Next.js 前端
+├── newbee-mall/                        # 本项目的测试对象
+│   ├── NewBeeMall_Testable_Areas.xlsx  # 测试区域导入文件
+│   └── ...
+├── results/                            # 项目运行的结果，含json csv xlsx
+├── CODE_WIKI.md                        # 代码与功能说明
+├── PROJECT_STATUS_NEW.md               # 项目完成情况对照
 └── README.md
 ```
-
-`newbee-mall/` 是本项目演示用的被测系统/测试对象，保持为本地独立仓库，不纳入 `ST-Final` 的 Git 跟踪。
 
 ## 技术栈
 
@@ -44,19 +46,21 @@ ST-Final/
 
 ## 后端启动
 
+请先在`autotest-design/backend/.env`文件中创建以下内容字段：
+
+```
+AUTOTEST_DB_URL="jdbc:mysql://127.0.0.1:3306/autotest_design_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+AUTOTEST_DB_USER=root
+AUTOTEST_DB_PASSWORD=自己的本地MySQL数据库密码
+LLM_BASE_URL=https://api.deepseek.com
+LLM_API_KEY=sk-换成自己的API
+LLM_MODEL=deepseek-v4-flash
+```
+
+然后，
+
 ```powershell
 cd autotest-design/backend
-
-# 可选：按本机数据库配置环境变量
-$env:AUTOTEST_DB_URL="jdbc:mysql://localhost:3306/autotest_design_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
-$env:AUTOTEST_DB_USER="root"
-$env:AUTOTEST_DB_PASSWORD="123456"
-
-# 可选：配置 LLM，未配置时系统使用确定性 fallback
-$env:LLM_BASE_URL="https://api.deepseek.com"
-$env:LLM_API_KEY="your-api-key"
-$env:LLM_MODEL="deepseek-v4-flash"
-
 mvn spring-boot:run
 ```
 
@@ -84,4 +88,4 @@ npm run dev
 ## 说明
 
 - 根目录 `.gitignore` 已排除依赖、构建产物、运行日志、临时数据库文件以及本地测试对象目录。
-- `CODE_WIKI.md` 和 `PROJECT_STATUS.md` 提供更详细的实现说明与课程要求对照。
+- `CODE_WIKI.md` 和 `PROJECT_STATUS_NEW.md` 提供更详细的实现说明与课程要求对照。
