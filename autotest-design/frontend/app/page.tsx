@@ -73,7 +73,7 @@ const workspaceViews: Array<{ id: ViewId; label: string; description: string }> 
   { id: "analysis", label: "Risk & Coverage", description: "Risk matrix, coverage items, and strategies" },
   { id: "cases", label: "Test Cases", description: "Generated cases and human review" },
   { id: "evidence", label: "Execution Evidence", description: "Target-app execution results and improvements" },
-  { id: "models", label: "Artifacts & Export", description: "White-box model, suites, and FR 6.0 exports" },
+  { id: "models", label: "Artifacts & Export", description: "White-box model, suites, and exports" },
   { id: "logs", label: "Prompt Log", description: "Model calls, fallbacks, and summaries" }
 ];
 
@@ -161,6 +161,8 @@ export default function Home() {
     "E-commerce target application with storefront, user authentication, shopping cart, order, payment, and admin management workflows."
   );
   const [projectId, setProjectId] = useState<number | null>(null);
+  const [historyProjects, setHistoryProjects] = useState<Row[]>([]);
+  const [historyProjectId, setHistoryProjectId] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [manualText, setManualText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -216,6 +218,15 @@ export default function Home() {
     setSnapshot(normalizeSnapshot(raw));
   }
 
+  async function loadProjectHistory() {
+    const data = await api("/projects");
+    const projects = rowList(data);
+    setHistoryProjects(projects);
+    if (projects.length > 0) {
+      setHistoryProjectId((current) => current || text(projects[0].id));
+    }
+  }
+
   function ensureImportedRequirements() {
     if (snapshot.requirements.length === 0) {
       throw new Error(
@@ -244,20 +255,37 @@ export default function Home() {
   }
 
   async function refresh(id = projectId) {
-    if (!id) return;
+    if (!id) return false;
     try {
       const data = await api(`/projects/${id}`);
       applySnapshot(data);
+      return true;
     } catch (err) {
       if ((err as Error & { status?: number }).status === 404) {
         window.localStorage.removeItem(PROJECT_ID_STORAGE_KEY);
         setProjectId(null);
         setSnapshot(emptySnapshot);
         setActiveView("overview");
-        return;
+        setError(`没有找到项目 #${id}，请从 History Record 选择已有项目。`);
+        return false;
       }
       throw err;
     }
+  }
+
+  async function loadHistoryProject(idValue = historyProjectId) {
+    const id = Number(idValue);
+    if (!Number.isFinite(id)) {
+      setError("请输入有效的历史项目 ID。");
+      return;
+    }
+    await run("Loading history record", async () => {
+      const loaded = await refresh(id);
+      if (!loaded) return;
+      setProjectId(id);
+      setHistoryProjectId(String(id));
+      setActiveView("overview");
+    });
   }
 
   async function createProject() {
@@ -273,7 +301,9 @@ export default function Home() {
         throw new Error("创建项目失败：后端未返回有效的项目 id。");
       }
       setProjectId(id);
+      setHistoryProjectId(String(id));
       applySnapshot(data);
+      await loadProjectHistory();
     });
   }
 
@@ -476,6 +506,9 @@ export default function Home() {
   useEffect(() => {
     const saved = window.localStorage.getItem("autotest-sidebar-width-v2");
     if (saved) setSidebarWidth(clampSidebarWidth(Number(saved)));
+    void loadProjectHistory().catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
   }, []);
 
   useEffect(() => {
@@ -531,9 +564,34 @@ export default function Home() {
           <button className="button" onClick={createProject} disabled={busy !== ""}>
             <Boxes size={16} /> Create New Project
           </button>
-          <button className="ghostButton" onClick={() => refresh()} disabled={!projectId || busy !== ""}>
-            <RefreshCw size={14} /> Reload Project Data
-          </button>
+          <div className="historyPicker">
+            <label htmlFor="history-project-id">History Record</label>
+            <select
+              id="history-project-id"
+              value={historyProjectId}
+              onChange={(event) => setHistoryProjectId(event.target.value)}
+              disabled={busy !== "" || historyProjects.length === 0}
+            >
+              {historyProjects.length === 0 ? (
+                <option value="">No history records</option>
+              ) : historyProjects.map((project) => (
+                <option key={text(project.id)} value={text(project.id)}>
+                  #{text(project.id)} · {text(project.name || "Untitled")} · {text(project.target_app || "No target")}
+                </option>
+              ))}
+            </select>
+            <div className="historyActions">
+              <input
+                value={historyProjectId}
+                onChange={(event) => setHistoryProjectId(event.target.value)}
+                placeholder="Project ID"
+                disabled={busy !== ""}
+              />
+              <button className="ghostButton" onClick={() => loadHistoryProject()} disabled={!historyProjectId || busy !== ""}>
+                <RefreshCw size={14} /> Load
+              </button>
+            </div>
+          </div>
           {projectId && (
             <p className="projectMeta">
               Active project #{projectId}
@@ -729,7 +787,7 @@ export default function Home() {
                   <h3>Evidence-Based Coverage Improvement</h3>
                   <p className="panelNote">Add a new coverage item after reviewing execution results or discovered gaps.</p>
                 </div>
-                <span>FR9 improvement</span>
+                <span>Improvement</span>
               </div>
               <div className="formGrid">
                 <input className="input" placeholder="Requirement ID" value={newCoverage.requirementId} onChange={(e) => setNewCoverage((draft) => ({ ...draft, requirementId: e.target.value }))} />
@@ -770,7 +828,7 @@ export default function Home() {
                   <h3>Evidence-Based Test Case Improvement</h3>
                   <p className="panelNote">Create an extra test case when execution evidence reveals a missing scenario.</p>
                 </div>
-                <span>FR9 improvement</span>
+                <span>Improvement</span>
               </div>
               <div className="formGrid">
                 <input className="input" placeholder="Requirement ID" value={newTestCase.requirementId} onChange={(e) => setNewTestCase((draft) => ({ ...draft, requirementId: e.target.value }))} />
@@ -844,7 +902,7 @@ export default function Home() {
             <section className="panel">
               <div className="panelHeader">
                 <div>
-                  <h3>FR 6.0 Structured Artifact Export</h3>
+                  <h3>Structured Artifact Export</h3>
                   <p className="panelNote">Exports project-scoped requirements, risk scores, coverage items, strategies, test cases, optimized suites, prompt runs, and review records.</p>
                 </div>
                 <span>JSON, CSV, Excel</span>
@@ -872,7 +930,7 @@ export default function Home() {
               <div className="panel">
                 <div className="panelHeader">
                   <div>
-                    <h3>FR 7.0 Suite Optimizer</h3>
+                    <h3>Suite Optimizer</h3>
                     <p className="panelNote">Shows original size, optimized size, reduction, retained coverage, and the selection reason for each suite.</p>
                   </div>
                   <span>Risk and coverage efficiency</span>

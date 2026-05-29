@@ -186,7 +186,8 @@ select:focus-visible {
 }
 
 .projectCard input,
-.projectCard textarea {
+.projectCard textarea,
+.projectCard select {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.17);
   background: rgba(255, 255, 255, 0.075);
@@ -194,6 +195,11 @@ select:focus-visible {
   border-radius: 6px;
   padding: 10px;
   margin-bottom: 11px;
+}
+
+.projectCard select option {
+  color: var(--ink);
+  background: white;
 }
 
 .projectCard textarea {
@@ -364,6 +370,28 @@ select:focus-visible {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.historyPicker {
+  margin-top: 11px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.historyActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.historyActions input {
+  margin-bottom: 0;
+}
+
+.historyActions .ghostButton {
+  min-height: 40px;
+  white-space: nowrap;
 }
 
 .toolbar {
